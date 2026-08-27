@@ -1,0 +1,525 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x", "linux-musl", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  GUEST
+  BUYER
+  SELLER
+  MODERATOR
+  ADMIN
+}
+
+enum AuctionStatus {
+  DRAFT
+  PENDING_REVIEW
+  SCHEDULED
+  ACTIVE
+  ENDING
+  ENDED
+  CANCELLED
+  SUSPENDED
+  SETTLED
+  DISPUTED
+}
+
+enum OrderStatus {
+  AWAITING_PAYMENT
+  PAID
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  WAITING_FOR_BUYER
+  WAITING_FOR_SELLER
+  RESOLVED
+  ESCALATED
+  CLOSED
+}
+
+enum SecurityEventSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model User {
+  id                    String                   @id @default(uuid())
+  email                 String                   @unique
+  passwordHash          String
+  username              String                   @unique
+  firstName             String?
+  lastName              String?
+  phone                 String?
+  avatarUrl             String?
+  isEmailVerified       Boolean                  @default(false)
+  isMfaEnabled          Boolean                  @default(false)
+  mfaSecret             String?
+  mfaBackupCodes        String[]                 @default([])
+  accountStatus         String                   @default("ACTIVE") // ACTIVE, SUSPENDED, DELETED
+  failedLoginAttempts   Int                      @default(0)
+  lockedUntil           DateTime?
+  riskScore             Int                      @default(0)
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  roles                 UserRole[]
+  sessions              Session[]
+  refreshTokens         RefreshToken[]
+  listings              Listing[]                @relation("SellerListings")
+  bids                  Bid[]                    @relation("UserBids")
+  proxyBids             ProxyBid[]               @relation("UserProxyBids")
+  watchlists            Watchlist[]
+  favorites             Favorite[]
+  buyerOrders           Order[]                  @relation("BuyerOrders")
+  sellerOrders          Order[]                  @relation("SellerOrders")
+  notifications         Notification[]
+  disputesAsBuyer       Dispute[]                @relation("BuyerDisputes")
+  disputesAsSeller      Dispute[]                @relation("SellerDisputes")
+  disputeMessages       DisputeMessage[]
+  reportsSubmitted      Report[]                 @relation("ReporterUser")
+  reviewsGiven          Review[]                 @relation("ReviewerUser")
+  reviewsReceived       Review[]                 @relation("RevieweeUser")
+  auditLogs             AuditLog[]
+  securityEvents        SecurityEvent[]
+  passwordResetTokens   PasswordResetToken[]
+  emailTokens           EmailVerificationToken[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        RoleName         @unique
+  description String?
+  userRoles   UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  code        String           @unique // e.g., 'auctions:create', 'users:manage'
+  description String?
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  token        String   @unique
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  isRevoked    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verification_tokens")
+}
+
+model Category {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  slug        String     @unique
+  description String?
+  parentId    String?
+  parent      Category?  @relation("SubCategories", fields: [parentId], references: [id])
+  children    Category[] @relation("SubCategories")
+  listings    Listing[]
+  createdAt   DateTime   @default(now())
+
+  @@map("categories")
+}
+
+model Listing {
+  id                   String         @id @default(uuid())
+  sellerId             String
+  categoryId           String
+  title                String
+  description          String
+  condition            String         // NEW, LIKE_NEW, GOOD, FAIR, POOR
+  itemLocation         String?
+  shippingOptions      String?
+  returnPolicy         String?
+  terms                String?
+  moderationReason     String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  seller               User           @relation("SellerListings", fields: [sellerId], references: [id])
+  category             Category       @relation(fields: [categoryId], references: [id])
+  images               ListingImage[]
+  auction              Auction?
+  reports              Report[]
+
+  @@map("listings")
+}
+
+model ListingImage {
+  id        String   @id @default(uuid())
+  listingId String
+  url       String
+  thumbnail String?
+  isPrimary Boolean  @default(false)
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@map("listing_images")
+}
+
+model Auction {
+  id                  String        @id @default(uuid())
+  listingId           String        @unique
+  status              AuctionStatus @default(DRAFT)
+  startingPrice       Decimal       @db.Decimal(12, 2)
+  currentPrice        Decimal       @db.Decimal(12, 2)
+  minBidIncrement     Decimal       @db.Decimal(12, 2)
+  reservePrice        Decimal?      @db.Decimal(12, 2)
+  currency            String        @default("GHS")
+  startTime           DateTime
+  endTime             DateTime
+  originalEndTime     DateTime
+  antiSnipeSeconds    Int           @default(30)
+  antiSnipeExtendMins Int           @default(2)
+  winningBidId        String?
+  winnerId            String?
+  bidCount            Int           @default(0)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  listing             Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  bids                Bid[]
+  proxyBids           ProxyBid[]
+  watchlists          Watchlist[]
+  favorites           Favorite[]
+  order               Order?
+
+  @@index([status, endTime])
+  @@index([startTime])
+  @@map("auctions")
+}
+
+model Bid {
+  id            String   @id @default(uuid())
+  auctionId     String
+  userId        String
+  amount        Decimal  @db.Decimal(12, 2)
+  currency      String   @default("GHS")
+  isAutoBid     Boolean  @default(false)
+  isInvalidated Boolean  @default(false)
+  invalidReason String?
+  createdAt     DateTime @default(now())
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  user    User    @relation("UserBids", fields: [userId], references: [id])
+
+  @@index([auctionId, amount(sort: Desc)])
+  @@index([userId])
+  @@map("bids")
+}
+
+model ProxyBid {
+  id        String   @id @default(uuid())
+  auctionId String
+  userId    String
+  maxAmount Decimal  @db.Decimal(12, 2)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  user    User    @relation("UserProxyBids", fields: [userId], references: [id])
+
+  @@unique([auctionId, userId])
+  @@map("proxy_bids")
+}
+
+model Watchlist {
+  id        String   @id @default(uuid())
+  userId    String
+  auctionId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, auctionId])
+  @@map("watchlists")
+}
+
+model Favorite {
+  id        String   @id @default(uuid())
+  userId    String
+  auctionId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, auctionId])
+  @@map("favorites")
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  auctionId     String      @unique
+  buyerId       String
+  sellerId      String
+  totalAmount   Decimal     @db.Decimal(12, 2)
+  currency      String      @default("GHS")
+  status        OrderStatus @default(AWAITING_PAYMENT)
+  shippingName  String?
+  shippingAddr  String?
+  shippingCity  String?
+  shippingPhone String?
+  trackingNo    String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  auction  Auction   @relation(fields: [auctionId], references: [id])
+  buyer    User      @relation("BuyerOrders", fields: [buyerId], references: [id])
+  seller   User      @relation("SellerOrders", fields: [sellerId], references: [id])
+  payment  Payment?
+  shipment Shipment?
+  disputes Dispute[]
+
+  @@map("orders")
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  orderId       String        @unique
+  provider      String        // e.g., 'PAYSTACK', 'STRIPE', 'MOBILE_MONEY'
+  transactionRef String       @unique
+  amount        Decimal       @db.Decimal(12, 2)
+  currency      String        @default("GHS")
+  status        PaymentStatus @default(PENDING)
+  rawWebhookData Json?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model Shipment {
+  id          String   @id @default(uuid())
+  orderId     String   @unique
+  carrier     String?
+  trackingNo  String?
+  status      String   @default("PENDING") // PENDING, SHIPPED, DELIVERED
+  shippedAt   DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("shipments")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  type      String   // BID_ACCEPTED, OUTBID, WINNER, AUCTION_ENDING, etc.
+  data      Json?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model Dispute {
+  id            String        @id @default(uuid())
+  orderId       String
+  buyerId       String
+  sellerId      String
+  category      String        // ITEM_NOT_RECEIVED, DAMAGED, FRAUD, etc.
+  status        DisputeStatus @default(OPEN)
+  resolution    String?
+  refundAmount  Decimal?      @db.Decimal(12, 2)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  order    Order            @relation(fields: [orderId], references: [id])
+  buyer    User             @relation("BuyerDisputes", fields: [buyerId], references: [id])
+  seller   User             @relation("SellerDisputes", fields: [sellerId], references: [id])
+  messages DisputeMessage[]
+
+  @@map("disputes")
+}
+
+model DisputeMessage {
+  id        String   @id @default(uuid())
+  disputeId String
+  userId    String
+  message   String
+  attachments String[] @default([])
+  createdAt DateTime @default(now())
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@map("dispute_messages")
+}
+
+model Report {
+  id         String   @id @default(uuid())
+  reporterId String
+  listingId  String?
+  reason     String
+  details    String?
+  status     String   @default("PENDING") // PENDING, REVIEWED, ACTION_TAKEN, DISMISSED
+  createdAt  DateTime @default(now())
+
+  reporter User     @relation("ReporterUser", fields: [reporterId], references: [id])
+  listing  Listing? @relation(fields: [listingId], references: [id])
+
+  @@map("reports")
+}
+
+model Review {
+  id           String   @id @default(uuid())
+  reviewerId   String
+  revieweeId   String
+  orderId      String   @unique
+  rating       Int      // 1 to 5
+  comment      String?
+  createdAt    DateTime @default(now())
+
+  reviewer User @relation("ReviewerUser", fields: [reviewerId], references: [id])
+  reviewee User @relation("RevieweeUser", fields: [revieweeId], references: [id])
+
+  @@map("reviews")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String   // e.g. BID_ACCEPTED, USER_SUSPENDED, LISTING_APPROVED
+  resource   String
+  resourceId String?
+  requestId  String?
+  ipAddress  String?
+  userAgent  String?
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SecurityEvent {
+  id        String                @id @default(uuid())
+  userId    String?
+  eventType String                // FAILED_LOGIN, UNUSUAL_BIDDING, IP_CHANGE
+  severity  SecurityEventSeverity @default(LOW)
+  details   Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime              @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([severity])
+  @@index([createdAt])
+  @@map("security_events")
+}

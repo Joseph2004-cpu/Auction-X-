@@ -1,0 +1,23 @@
+# Netlify Deployment Configuration for AuctionX Frontend
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NEXT_USE_NETLIFY_EDGE = "true"
+
+[context.production.environment]
+  NEXT_PUBLIC_API_URL = "https://auctionx-backend.onrender.com"
+  NEXT_PUBLIC_WS_URL = "https://auctionx-backend.onrender.com"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
