@@ -21,17 +21,19 @@ export default function AdminDashboardPage() {
   const [userList, setUserList] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [securityEvents, setSecurityEvents] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'security'>('users');
+  const [disputes, setDisputes] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'users' | 'audit' | 'security' | 'disputes'>('users');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadAdminData() {
       try {
-        const [statsRes, usersRes, auditRes, secRes] = await Promise.all([
+        const [statsRes, usersRes, auditRes, secRes, disputesRes] = await Promise.all([
           fetchApi('/api/v1/admin/dashboard'),
           fetchApi('/api/v1/admin/users'),
           fetchApi('/api/v1/admin/audit-logs'),
           fetchApi('/api/v1/admin/security-events'),
+          fetchApi('/api/v1/disputes/admin/all'),
         ]);
 
         if (statsRes.success) setStats(statsRes.data);
@@ -48,6 +50,7 @@ export default function AdminDashboardPage() {
           const data = secRes.data;
           setSecurityEvents(Array.isArray(data) ? data : data?.events || []);
         }
+        if (disputesRes.success) setDisputes(disputesRes.data || []);
       } catch (err) {
       } finally {
         setLoading(false);
@@ -72,6 +75,20 @@ export default function AdminDashboardPage() {
         setUserList((prev) =>
           prev.map((u) => (u.id === userId ? { ...u, accountStatus: newStatus } : u))
         );
+      }
+    } catch (err) {}
+  };
+
+  const resolveDispute = async (disputeId: string, status: 'RESOLVED' | 'CLOSED') => {
+    const resolution = window.prompt('Enter the resolution for this dispute:');
+    if (!resolution) return;
+    try {
+      const res = await fetchApi(`/api/v1/disputes/admin/${disputeId}/resolve`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status, resolution }),
+      });
+      if (res.success) {
+        setDisputes((prev) => prev.map((dispute) => dispute.id === disputeId ? { ...dispute, status, resolution } : dispute));
       }
     } catch (err) {}
   };
@@ -164,6 +181,14 @@ export default function AdminDashboardPage() {
           }`}
         >
           Security Events
+        </button>
+        <button
+          onClick={() => setActiveTab('disputes')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'disputes' ? 'bg-sky-500 text-white' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          Disputes ({disputes.filter((dispute) => !['RESOLVED', 'CLOSED'].includes(dispute.status)).length})
         </button>
       </div>
 
@@ -259,6 +284,36 @@ export default function AdminDashboardPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {activeTab === 'disputes' && (
+        <div className="space-y-4">
+          {disputes.length === 0 ? (
+            <div className="glass-card rounded-2xl p-12 text-center text-sm text-slate-400">No disputes have been opened.</div>
+          ) : disputes.map((dispute) => (
+            <div key={dispute.id} className="glass-card rounded-2xl p-5 space-y-4 border-slate-800">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs text-slate-400">Order {dispute.orderId} • {dispute.category}</p>
+                  <h3 className="text-base font-bold text-white mt-1">{dispute.buyer?.username || 'Buyer'} vs {dispute.seller?.username || 'Seller'}</h3>
+                </div>
+                <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${dispute.status === 'OPEN' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
+                  {dispute.status}
+                </span>
+              </div>
+              <div className="space-y-2 text-xs text-slate-300">
+                {dispute.messages?.slice(-2).map((message: any) => <p key={message.id} className="p-3 rounded-xl bg-slate-900 border border-slate-800">{message.message}</p>)}
+              </div>
+              {!['RESOLVED', 'CLOSED'].includes(dispute.status) && (
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => resolveDispute(dispute.id, 'RESOLVED')} className="px-3 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white">Resolve dispute</button>
+                  <button onClick={() => resolveDispute(dispute.id, 'CLOSED')} className="px-3 py-2 rounded-lg text-xs font-bold bg-slate-700 hover:bg-slate-600 text-white">Close without action</button>
+                </div>
+              )}
+              {dispute.resolution && <p className="text-xs text-emerald-300">Resolution: {dispute.resolution}</p>}
+            </div>
+          ))}
         </div>
       )}
 

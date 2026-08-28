@@ -77,12 +77,53 @@ export class BidsService {
           newEndTime = new Date(currentEndTime.getTime() + antiSnipeExtendMins * 60 * 1000);
         }
 
+        const requestedMax = input.maxProxyAmount === undefined
+          ? proposedAmount
+          : new Decimal(input.maxProxyAmount);
+        if (requestedMax.lessThan(proposedAmount)) {
+          throw new AppError('Maximum proxy bid must be at least your bid.', 400, 'INVALID_PROXY_BID');
+        }
+
+        if (input.maxProxyAmount !== undefined) {
+          await tx.proxyBid.upsert({
+            where: { auctionId_userId: { auctionId: input.auctionId, userId: input.userId } },
+            update: { maxAmount: requestedMax.toFixed(2), isActive: true },
+            create: {
+              auctionId: input.auctionId,
+              userId: input.userId,
+              maxAmount: requestedMax.toFixed(2),
+            },
+          });
+        }
+
+        const activeProxies = await tx.proxyBid.findMany({
+          where: { auctionId: input.auctionId, isActive: true },
+          orderBy: [{ maxAmount: 'desc' }, { updatedAt: 'asc' }],
+        });
+        const leadingProxy = activeProxies[0];
+        const runnerUpProxy = activeProxies[1];
+        if (leadingProxy && leadingProxy.userId !== input.userId && requestedMax.lessThanOrEqualTo(leadingProxy.maxAmount.toString())) {
+          throw new AppError('Your maximum proxy bid must exceed the current maximum bid.', 400, 'PROXY_BID_TOO_LOW');
+        }
+
+        const previousWinnerId = auction.winnerId as string | null;
+        const winningAmount = leadingProxy?.userId === input.userId
+          ? Decimal.min(
+              requestedMax,
+              Decimal.max(
+                currentPrice.plus(minIncrement),
+                runnerUpProxy ? new Decimal(runnerUpProxy.maxAmount.toString()).plus(minIncrement) : currentPrice.plus(minIncrement),
+              ),
+            )
+          : proposedAmount;
+
         const newBid = await tx.bid.create({
           data: {
             auctionId: input.auctionId,
             userId: input.userId,
-            amount: proposedAmount.toFixed(2),
+            amount: winningAmount.toFixed(2),
             currency: auction.currency || 'GHS',
+            isAutoBid: input.maxProxyAmount !== undefined,
           },
           include: {
             user: { select: { id: true, username: true } },
@@ -93,7 +134,7 @@ export class BidsService {
         await tx.auction.update({
           where: { id: input.auctionId },
           data: {
-            currentPrice: proposedAmount.toFixed(2),
+            currentPrice: winningAmount.toFixed(2),
             bidCount: newBidCount,
             winningBidId: newBid.id,
             winnerId: input.userId,
@@ -104,12 +145,27 @@ export class BidsService {
         return {
           bid: newBid,
           auctionId: input.auctionId,
-          currentPrice: proposedAmount.toNumber(),
+          currentPrice: winningAmount.toNumber(),
           bidCount: newBidCount,
           endTime: newEndTime.toISOString(),
           timeExtended: newEndTime.getTime() > currentEndTime.getTime(),
+          previousWinnerId,
         };
       });
+
+      if (result.previousWinnerId && result.previousWinnerId !== result.bid.userId) {
+        try {
+          await prisma.notification.create({
+            data: {
+              userId: result.previousWinnerId,
+              title: 'You have been outbid',
+              message: `A new bid of GHS ${result.currentPrice.toFixed(2)} is leading this auction.`,
+              type: 'OUTBID',
+              data: { auctionId: input.auctionId },
+            },
+          });
+        } catch {}
+      }
 
       const io = getSocketIO();
       if (io) {

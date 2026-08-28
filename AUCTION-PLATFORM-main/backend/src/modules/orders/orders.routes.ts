@@ -32,10 +32,10 @@ router.post('/:id/pay', requireAuth, async (req: AuthenticatedRequest, res: Resp
   }
 });
 
-router.post('/webhook/mock-confirm', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+router.post('/webhook/mock-confirm', requireAuth, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const { transactionRef } = req.body;
-    const payment = await OrdersService.processPaymentSuccess(transactionRef);
+    const payment = await OrdersService.processPaymentSuccess(transactionRef, req.user!.userId);
     res.status(200).json({ success: true, data: payment, message: 'Payment confirmed server-to-server.' });
   } catch (error) {
     next(error);

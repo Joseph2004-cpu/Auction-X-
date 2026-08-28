@@ -75,9 +75,9 @@
 
 ### Environment Setup
 
-1. Copy `.env.example` to `backend/.env`:
+1. Copy `backend/.env.example` to `backend/.env`:
    ```bash
-   cp .env.example backend/.env
+   cp backend/.env.example backend/.env
    ```
 
 2. Install backend & frontend dependencies:
@@ -107,6 +107,21 @@
 | **Admin** | `admin@auctionx.com` | `Password123!` |
 | **Seller** | `seller@auctionx.com` | `Password123!` |
 | **Buyer** | `buyer@auctionx.com` | `Password123!` |
+
+The seeded users support the complete classroom flow: create an auction as the seller, place a normal or proxy bid as the buyer, open the auction in a second browser session to see live updates, wait for finalization to create the winner order, complete mock checkout, open a dispute, and resolve it from the Admin Console.
+
+Run the presentation from `AUCTION-PLATFORM-main/AUCTION-PLATFORM-main`:
+
+```bash
+docker compose up -d postgres redis
+cd backend
+npx prisma generate
+npx prisma db push
+npm run prisma:seed
+npm run dev
+```
+
+In a second terminal, run `cd frontend && npm run dev`, then open `http://localhost:3000`. Payment is intentionally simulated and does not charge real money.
 
 ---
 

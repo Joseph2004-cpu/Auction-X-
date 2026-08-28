@@ -60,21 +60,24 @@ export class OrdersService {
   }
 
   public static async getOrderById(orderId: string, requestingUserId: string) {
-    try {
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        include: {
-          auction: {
-            include: { listing: { include: { images: true } } },
-          },
-          buyer: { select: { id: true, username: true, email: true } },
-          seller: { select: { id: true, username: true, email: true } },
-          payment: true,
-          shipment: true,
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        auction: {
+          include: { listing: { include: { images: true } } },
         },
-      });
-      if (order) return order;
-    } catch (err) {}
+        buyer: { select: { id: true, username: true, email: true } },
+        seller: { select: { id: true, username: true, email: true } },
+        payment: true,
+        shipment: true,
+      },
+    });
+    if (order) {
+      if (order.buyerId !== requestingUserId && order.sellerId !== requestingUserId) {
+        throw new AppError('You are not authorized to view this order.', 403, 'FORBIDDEN');
+      }
+      return order;
+    }
 
     const mock = MOCK_ORDERS.find((o) => o.id === orderId);
     if (!mock) throw new AppError('Order not found.', 404, 'NOT_FOUND');
@@ -82,19 +85,63 @@ export class OrdersService {
   }
 
   public static async initiateOrderPayment(orderId: string, buyerId: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { buyer: { select: { email: true } } },
+    });
+    if (!order) throw new AppError('Order not found.', 404, 'NOT_FOUND');
+    if (order.buyerId !== buyerId) throw new AppError('Only the buyer can pay for this order.', 403, 'FORBIDDEN');
+    if (order.status !== 'AWAITING_PAYMENT') throw new AppError('This order is not awaiting payment.', 400, 'ORDER_NOT_PAYABLE');
+
     const provider = new MockPaymentProvider();
     const result = await provider.createPayment(
       orderId,
-      15250,
-      'GHS',
-      'buyer@auctionx.com'
+      parseFloat(order.totalAmount.toString()),
+      order.currency,
+      order.buyer.email,
     );
+
+    await prisma.payment.upsert({
+      where: { orderId },
+      update: {
+        transactionRef: result.transactionRef,
+        amount: order.totalAmount,
+        currency: order.currency,
+        status: 'PENDING',
+        provider: 'MOCK',
+      },
+      create: {
+        orderId,
+        transactionRef: result.transactionRef,
+        amount: order.totalAmount,
+        currency: order.currency,
+        status: 'PENDING',
+        provider: 'MOCK',
+      },
+    });
     return result;
   }
 
-  public static async processPaymentSuccess(transactionRef: string) {
-    const mockOrder = MOCK_ORDERS.find((o) => o.id === 'ord-101');
-    if (mockOrder) mockOrder.status = 'PAID';
-    return { status: 'COMPLETED', transactionRef };
+  public static async processPaymentSuccess(transactionRef: string, buyerId: string) {
+    const payment = await prisma.payment.findUnique({
+      where: { transactionRef },
+      include: { order: true },
+    });
+    if (!payment) throw new AppError('Payment transaction not found.', 404, 'PAYMENT_NOT_FOUND');
+    if (payment.order.buyerId !== buyerId) throw new AppError('Only the order buyer can confirm payment.', 403, 'FORBIDDEN');
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const confirmedPayment = await tx.payment.update({
+        where: { id: payment.id },
+        data: { status: 'COMPLETED' },
+      });
+      await tx.order.update({
+        where: { id: payment.orderId },
+        data: { status: 'PAID' },
+      });
+      return confirmedPayment;
+    });
+
+    return { status: updated.status, transactionRef: updated.transactionRef };
   }
 }

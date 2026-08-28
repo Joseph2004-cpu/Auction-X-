@@ -8,7 +8,7 @@ import { AppError } from '../../middleware/errorHandler';
 import crypto from 'crypto';
 
 // In-memory fallback users for seamless local demo execution when PostgreSQL service is offline
-const MOCK_USERS: Record<string, any> = {
+export const MOCK_USERS: Record<string, any> = {
   'buyer@auctionx.com': {
     id: 'mock-buyer-id-1',
     email: 'buyer@auctionx.com',
@@ -46,9 +46,10 @@ export class AuthService {
     ipAddress?: string;
     userAgent?: string;
   }) {
+    const normalizedEmail = data.email.toLowerCase().trim();
     const requestedRole = data.role === 'SELLER' ? 'SELLER' : 'BUYER';
     try {
-      const existingEmail = await prisma.user.findUnique({ where: { email: data.email } });
+      const existingEmail = await prisma.user.findUnique({ where: { email: normalizedEmail } });
       if (existingEmail) {
         throw new AppError('This email address is already registered.', 400, 'EMAIL_EXISTS');
       }
@@ -81,7 +82,7 @@ export class AuthService {
 
       const user = await prisma.user.create({
         data: {
-          email: data.email,
+          email: normalizedEmail,
           passwordHash,
           username: data.username,
           firstName: data.firstName,
@@ -101,13 +102,23 @@ export class AuthService {
     } catch (err: any) {
       if (err instanceof AppError) throw err;
       // Fallback for local demo mode without PostgreSQL
+      if (MOCK_USERS[normalizedEmail]) {
+        throw new AppError('This email address is already registered.', 400, 'EMAIL_EXISTS');
+      }
+      const isUsernameTaken = Object.values(MOCK_USERS).some((u) => u.username === data.username);
+      if (isUsernameTaken) {
+        throw new AppError('This username is already taken.', 400, 'USERNAME_EXISTS');
+      }
+
+      const passwordHash = await PasswordHasher.hash(data.password);
       const mockId = `user_${Date.now()}`;
       const userRoles = requestedRole === 'SELLER' ? ['SELLER', 'BUYER'] : ['BUYER'];
       const userPermissions = requestedRole === 'SELLER' ? ['auctions:create', 'auctions:bid'] : ['auctions:bid'];
 
-      MOCK_USERS[data.email] = {
+      MOCK_USERS[normalizedEmail] = {
         id: mockId,
-        email: data.email,
+        email: normalizedEmail,
+        passwordHash,
         username: data.username,
         roles: userRoles,
         permissions: userPermissions,
@@ -115,7 +126,7 @@ export class AuthService {
       };
       return {
         userId: mockId,
-        email: data.email,
+        email: normalizedEmail,
         username: data.username,
         role: requestedRole,
       };
@@ -129,12 +140,13 @@ export class AuthService {
     ipAddress?: string;
     userAgent?: string;
   }) {
+    const normalizedEmail = data.email.toLowerCase().trim();
     let user: any = null;
     let isDbConnected = true;
 
     try {
       user = await prisma.user.findUnique({
-        where: { email: data.email },
+        where: { email: normalizedEmail },
         include: {
           roles: {
             include: {
@@ -151,18 +163,18 @@ export class AuthService {
       });
     } catch (err) {
       isDbConnected = false;
-      user = MOCK_USERS[data.email];
+      user = MOCK_USERS[normalizedEmail];
     }
 
     if (!user && !isDbConnected) {
-      user = MOCK_USERS[data.email];
+      user = MOCK_USERS[normalizedEmail];
     }
 
     if (!user) {
       throw new AppError('Invalid email or password.', 401, 'INVALID_CREDENTIALS');
     }
 
-    if (isDbConnected && user.passwordHash) {
+    if (user.passwordHash) {
       const isValidPassword = await PasswordHasher.verify(user.passwordHash, data.password);
       if (!isValidPassword) {
         throw new AppError('Invalid email or password.', 401, 'INVALID_CREDENTIALS');

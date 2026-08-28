@@ -1,10 +1,12 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { CountdownTimer } from './CountdownTimer';
-import { Tag, TrendingUp, User } from 'lucide-react';
+import { Tag, TrendingUp, User, Heart } from 'lucide-react';
+import { fetchApi } from '../lib/api';
+import { useAuthStore } from '../store/useAuthStore';
 
 export interface AuctionCardProps {
   id: string;
@@ -17,6 +19,7 @@ export interface AuctionCardProps {
   sellerUsername?: string;
   condition?: string;
   categoryName?: string;
+  isWatchlisted?: boolean;
 }
 
 export const AuctionCard: React.FC<AuctionCardProps> = ({
@@ -30,7 +33,23 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({
   sellerUsername = 'verified_seller',
   condition = 'NEW',
   categoryName = 'Electronics',
+  isWatchlisted = false,
 }) => {
+  const { user } = useAuthStore();
+  const [watchlisted, setWatchlisted] = useState(isWatchlisted);
+  const [savingWatchlist, setSavingWatchlist] = useState(false);
+
+  const toggleWatchlist = async () => {
+    if (!user || savingWatchlist) return;
+    setSavingWatchlist(true);
+    try {
+      await fetchApi(`/api/v1/watchlists/${id}`, { method: watchlisted ? 'DELETE' : 'POST' });
+      setWatchlisted(!watchlisted);
+    } finally {
+      setSavingWatchlist(false);
+    }
+  };
+
   return (
     <div className="glass-card rounded-2xl overflow-hidden hover:border-sky-500/40 hover:shadow-xl hover:shadow-sky-500/10 transition-all group flex flex-col justify-between">
       <div>
@@ -49,6 +68,18 @@ export const AuctionCard: React.FC<AuctionCardProps> = ({
           <div className="absolute bottom-3 right-3">
             <CountdownTimer targetDate={endTime} />
           </div>
+          {user && (
+            <button
+              type="button"
+              aria-label={watchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
+              title={watchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
+              onClick={toggleWatchlist}
+              disabled={savingWatchlist}
+              className={`absolute top-3 right-3 p-2 rounded-full border backdrop-blur-md transition-colors ${watchlisted ? 'bg-red-500 text-white border-red-400' : 'bg-slate-950/80 text-slate-200 border-white/10 hover:text-red-300'}`}
+            >
+              <Heart className="w-4 h-4" fill={watchlisted ? 'currentColor' : 'none'} />
+            </button>
+          )}
         </div>
 
         {/* Content */}

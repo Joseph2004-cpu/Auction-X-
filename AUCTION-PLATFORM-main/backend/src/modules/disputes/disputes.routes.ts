@@ -1,6 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { DisputesService } from './disputes.service';
-import { requireAuth, AuthenticatedRequest } from '../../middleware/auth';
+import { requireAuth, requirePermission, AuthenticatedRequest } from '../../middleware/auth';
 
 const router = Router();
 
@@ -26,6 +26,25 @@ router.post('/:id/messages', requireAuth, async (req: AuthenticatedRequest, res:
   try {
     const msg = await DisputesService.addDisputeMessage(req.params.id, req.user!.userId, req.body.message);
     res.status(201).json({ success: true, data: msg });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/admin/all', requireAuth, requirePermission('disputes:resolve'), async (_req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const disputes = await DisputesService.getAllDisputes();
+    res.status(200).json({ success: true, data: disputes });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch('/admin/:id/resolve', requireAuth, requirePermission('disputes:resolve'), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { status, resolution, refundAmount } = req.body;
+    const dispute = await DisputesService.resolveDispute(req.params.id, status, resolution, refundAmount);
+    res.status(200).json({ success: true, data: dispute, message: 'Dispute resolution saved.' });
   } catch (error) {
     next(error);
   }

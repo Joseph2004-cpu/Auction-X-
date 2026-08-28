@@ -100,21 +100,23 @@ app.use(errorHandler);
 initWebSocket(server);
 
 // Background Worker Timer for Auction Expiration Finalization (Section 13 & 53 of Master Prompt)
-setInterval(async () => {
-  try {
-    await AuctionsService.finalizeExpiredAuctions();
-  } catch (err: any) {
-    logger.error('Background auction expiration check failed', { error: err.message });
-  }
-}, 10000);
+if (process.env.NODE_ENV !== 'test') {
+  setInterval(async () => {
+    try {
+      await AuctionsService.finalizeExpiredAuctions();
+    } catch (err: any) {
+      logger.error('Background auction expiration check failed', { error: err.message });
+    }
+  }, 10000);
 
-server.listen(config.port, '0.0.0.0', () => {
-  logger.info(`=======================================================`);
-  logger.info(`  AuctionX Secure Platform API Server Running`);
-  logger.info(`  Environment: ${config.nodeEnv}`);
-  logger.info(`  Port       : ${config.port}`);
-  logger.info(`  Health     : http://0.0.0.0:${config.port}/health`);
-  logger.info(`=======================================================`);
-});
+  server.listen(config.port, '0.0.0.0', () => {
+    logger.info(`=======================================================`);
+    logger.info(`  AuctionX Secure Platform API Server Running`);
+    logger.info(`  Environment: ${config.nodeEnv}`);
+    logger.info(`  Port       : ${config.port}`);
+    logger.info(`  Health     : http://0.0.0.0:${config.port}/health`);
+    logger.info(`=======================================================`);
+  });
+}
 
 export { app, server };

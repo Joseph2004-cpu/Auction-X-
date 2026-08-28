@@ -218,32 +218,66 @@ export class ListingsService {
   }
 
   public static async createListing(sellerId: string, data: any) {
-    const newAuctionId = `demo-${Date.now()}`;
-    const newAuction = {
-      id: newAuctionId,
-      status: 'ACTIVE',
-      startingPrice: data.startingPrice,
-      reservePrice: data.reservePrice,
-      currentPrice: data.startingPrice,
-      bidIncrement: data.bidIncrement,
-      bidCount: 0,
-      startTime: new Date().toISOString(),
-      endTime: new Date(Date.now() + (data.durationDays || 7) * 86400000).toISOString(),
-      antiSnipeExtensions: 0,
-      listing: {
-        id: `list-${Date.now()}`,
+    const seller = await prisma.user.findUnique({ where: { id: sellerId }, select: { id: true } });
+    if (!seller) throw new AppError('Seller account not found.', 404, 'SELLER_NOT_FOUND');
+
+    const category = await prisma.category.findUnique({ where: { id: data.categoryId }, select: { id: true } });
+    if (!category) throw new AppError('Selected category was not found.', 400, 'CATEGORY_NOT_FOUND');
+
+    const startTime = data.startTime ? new Date(data.startTime) : new Date();
+    const endTime = data.endTime
+      ? new Date(data.endTime)
+      : new Date(startTime.getTime() + (data.durationDays || 7) * 86400000);
+    if (Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime()) || endTime <= startTime) {
+      throw new AppError('Auction end time must be after its start time.', 400, 'INVALID_AUCTION_DATES');
+    }
+
+    const startingPrice = data.startingPrice;
+    const minBidIncrement = data.minBidIncrement ?? data.bidIncrement;
+    if (!minBidIncrement || minBidIncrement <= 0) {
+      throw new AppError('A minimum bid increment is required.', 400, 'INVALID_BID_INCREMENT');
+    }
+
+    return prisma.listing.create({
+      data: {
+        sellerId,
+        categoryId: category.id,
         title: data.title,
         description: data.description,
         condition: data.condition,
-        category: { id: 'cat-electronics', name: 'General' },
-        seller: { id: sellerId, username: 'seller_account', riskScore: 0 },
-        images: (data.images || []).map((url: string, i: number) => ({ id: `img-${i}`, url, isPrimary: i === 0 })),
+        itemLocation: data.itemLocation,
+        shippingOptions: data.shippingOptions,
+        returnPolicy: data.returnPolicy,
+        terms: data.terms,
+        images: data.images?.length
+          ? {
+              create: data.images.map((image: { url: string; isPrimary?: boolean }, index: number) => ({
+                url: image.url,
+                isPrimary: image.isPrimary ?? index === 0,
+                order: index,
+              })),
+            }
+          : undefined,
+        auction: {
+          create: {
+            status: startTime <= new Date() ? 'ACTIVE' : 'SCHEDULED',
+            startingPrice,
+            currentPrice: startingPrice,
+            minBidIncrement,
+            reservePrice: data.reservePrice,
+            startTime,
+            endTime,
+            originalEndTime: endTime,
+          },
+        },
       },
-      bids: [],
-    };
-
-    MOCK_AUCTIONS.unshift(newAuction);
-    return newAuction;
+      include: {
+        category: true,
+        seller: { select: { id: true, username: true, riskScore: true, avatarUrl: true } },
+        images: true,
+        auction: true,
+      },
+    });
   }
 
   public static async moderateListing(listingId: string, status: string, reason?: string, _moderatorId?: string) {

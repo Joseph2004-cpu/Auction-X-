@@ -37,63 +37,56 @@ export class DisputesService {
   }
 
   public static async getDisputeById(disputeId: string, userId: string) {
-    try {
-      const dispute = await prisma.dispute.findUnique({
-        where: { id: disputeId },
-        include: {
-          messages: { orderBy: { createdAt: 'asc' } },
-        },
-      });
-      if (dispute) return dispute;
-    } catch (err) {}
+    const dispute = await prisma.dispute.findUnique({
+      where: { id: disputeId },
+      include: {
+        messages: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+    if (dispute) {
+      if (dispute.buyerId !== userId && dispute.sellerId !== userId) {
+        throw new AppError('You are not a participant in this dispute.', 403, 'FORBIDDEN');
+      }
+      return dispute;
+    }
 
     const mock = MOCK_DISPUTES.find((d) => d.id === disputeId);
     if (!mock) throw new AppError('Dispute not found.', 404, 'NOT_FOUND');
+    if (mock.buyerId !== userId && mock.sellerId !== userId) {
+      throw new AppError('You are not a participant in this dispute.', 403, 'FORBIDDEN');
+    }
     return mock;
   }
 
   public static async createDispute(userId: string, data: { orderId: string; category: any; initialMessage: string }) {
-    try {
-      const dispute = await prisma.dispute.create({
-        data: {
-          orderId: data.orderId,
-          buyerId: userId,
-          sellerId: 'mock-seller-id-2',
-          category: data.category,
-          status: 'OPEN',
-          messages: {
-            create: {
-              userId,
-              message: data.initialMessage,
-            },
-          },
-        },
-        include: { messages: true },
-      });
-      return dispute;
-    } catch (err) {
-      const newDispute = {
-        id: `disp-${Date.now()}`,
+    const order = await prisma.order.findUnique({ where: { id: data.orderId }, select: { buyerId: true, sellerId: true } });
+    if (!order) throw new AppError('Order not found.', 404, 'ORDER_NOT_FOUND');
+    if (order.buyerId !== userId) throw new AppError('Only the order buyer can open a dispute.', 403, 'FORBIDDEN');
+
+    return prisma.dispute.create({
+      data: {
         orderId: data.orderId,
-        buyerId: userId,
+        buyerId: order.buyerId,
+        sellerId: order.sellerId,
         category: data.category,
         status: 'OPEN',
-        createdAt: new Date().toISOString(),
-        messages: [
-          {
-            id: `msg-${Date.now()}`,
-            userId,
-            message: data.initialMessage,
-            createdAt: new Date().toISOString(),
-          },
-        ],
-      };
-      MOCK_DISPUTES.unshift(newDispute);
-      return newDispute;
-    }
+        messages: {
+          create: { userId, message: data.initialMessage },
+        },
+      },
+      include: { messages: true },
+    });
   }
 
   public static async addDisputeMessage(disputeId: string, userId: string, message: string) {
+    await this.getDisputeById(disputeId, userId);
+
+    try {
+      return await prisma.disputeMessage.create({
+        data: { disputeId, userId, message },
+      });
+    } catch (err) {}
+
     const dispute = MOCK_DISPUTES.find((d) => d.id === disputeId);
     if (dispute) {
       const newMsg = { id: `msg-${Date.now()}`, userId, message, createdAt: new Date().toISOString() };
@@ -101,5 +94,28 @@ export class DisputesService {
       return newMsg;
     }
     return { id: `msg-${Date.now()}`, userId, message, createdAt: new Date().toISOString() };
+  }
+
+  public static async getAllDisputes() {
+    return prisma.dispute.findMany({
+      include: {
+        buyer: { select: { id: true, username: true, email: true } },
+        seller: { select: { id: true, username: true, email: true } },
+        order: { select: { id: true, totalAmount: true, status: true } },
+        messages: { orderBy: { createdAt: 'asc' } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  public static async resolveDispute(disputeId: string, status: 'RESOLVED' | 'CLOSED', resolution: string, refundAmount?: number) {
+    const dispute = await prisma.dispute.findUnique({ where: { id: disputeId } });
+    if (!dispute) throw new AppError('Dispute not found.', 404, 'NOT_FOUND');
+
+    return prisma.dispute.update({
+      where: { id: disputeId },
+      data: { status, resolution, refundAmount },
+      include: { messages: { orderBy: { createdAt: 'asc' } } },
+    });
   }
 }

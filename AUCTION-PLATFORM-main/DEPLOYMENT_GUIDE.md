@@ -2,6 +2,33 @@
 
 This guide details step-by-step instructions for deploying the **AuctionX Platform** with the **Backend API, PostgreSQL Database & Redis on Railway** and the **Next.js Frontend on Vercel**.
 
+For the classroom presentation, use the local setup first. The project is nested under `AUCTION-PLATFORM-main/AUCTION-PLATFORM-main`.
+
+## Local classroom setup
+
+From the nested project directory:
+
+```powershell
+docker compose up -d postgres redis
+Copy-Item backend/.env.example backend/.env
+Set-Location backend
+npm install
+npx prisma generate
+npx prisma db push
+npm run prisma:seed
+npm run dev
+```
+
+In another terminal:
+
+```powershell
+Set-Location frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000` and use the demo credentials in the README. Payment uses the simulated provider and must not be used for real transactions.
+
 ---
 
 ## Architecture Overview

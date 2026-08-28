@@ -1,6 +1,7 @@
 import { prisma } from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { PasswordHasher } from '../../security/password';
+import { MOCK_USERS } from '../auth/auth.service';
 
 const MOCK_PROFILES: Record<string, any> = {
   'mock-buyer-id-1': {
@@ -68,6 +69,17 @@ export class UsersService {
     } catch (err) {}
 
     // Fallback for mock accounts when PostgreSQL is offline
+    const dynamicMockUser = Object.values(MOCK_USERS).find((u) => u.id === userId);
+    if (dynamicMockUser) {
+      return {
+        ...dynamicMockUser,
+        isEmailVerified: true,
+        isMfaEnabled: false,
+        createdAt: new Date().toISOString(),
+        roles: dynamicMockUser.roles?.map((r: string) => ({ role: { name: r } })) || [{ role: { name: 'BUYER' } }],
+      };
+    }
+
     const profile = MOCK_PROFILES[userId] || {
       id: userId,
       email: 'user@auctionx.com',

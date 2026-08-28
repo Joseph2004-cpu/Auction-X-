@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '../store/useAuthStore';
 import {
@@ -14,12 +14,32 @@ import {
   User as UserIcon,
   AlertTriangle,
   ChevronDown,
+  Bell,
 } from 'lucide-react';
+import { fetchApi } from '../lib/api';
 
 export const Navbar: React.FC = () => {
-  const { user, logout } = useAuthStore();
+  const { user, logout, hydrate } = useAuthStore();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const isAdmin = user?.roles?.includes('ADMIN');
+
+  useEffect(() => {
+    hydrate();
+  }, [hydrate]);
+
+  useEffect(() => {
+    if (!user) {
+      setNotifications([]);
+      return;
+    }
+    fetchApi('/api/v1/notifications')
+      .then((response) => setNotifications(response.data || []))
+      .catch(() => setNotifications([]));
+  }, [user]);
+
+  const unreadCount = notifications.filter((notification) => !notification.isRead).length;
 
   return (
     <header className="sticky top-0 z-50 glass-nav border-b border-slate-800">
@@ -70,6 +90,34 @@ export const Navbar: React.FC = () => {
 
           {/* Action Buttons & User Menu */}
           <div className="flex items-center space-x-4">
+            {user && (
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label="Notifications"
+                  title="Notifications"
+                  onClick={() => setNotificationsOpen(!notificationsOpen)}
+                  className="relative p-2 text-slate-300 hover:text-white transition-colors"
+                >
+                  <Bell className="w-5 h-5" />
+                  {unreadCount > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-500 text-[9px] font-bold text-white flex items-center justify-center">{unreadCount}</span>}
+                </button>
+                {notificationsOpen && (
+                  <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-2rem)] glass-card rounded-2xl border border-slate-800 shadow-2xl z-50 p-3">
+                    <div className="flex items-center justify-between px-2 pb-2 border-b border-slate-800">
+                      <span className="text-sm font-bold text-white">Notifications</span>
+                      <span className="text-[10px] text-slate-500">{unreadCount} unread</span>
+                    </div>
+                    {notifications.length === 0 ? <p className="p-4 text-xs text-slate-400">No notifications yet.</p> : notifications.slice(0, 5).map((notification) => (
+                      <div key={notification.id} className={`p-2 mt-1 rounded-lg ${notification.isRead ? '' : 'bg-sky-500/10'}`}>
+                        <p className="text-xs font-semibold text-white">{notification.title}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{notification.message}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <Link
               href="/sell"
               className="hidden sm:inline-flex items-center space-x-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white shadow-md shadow-sky-500/20 transition-all"
